@@ -1,0 +1,203 @@
+/*******************************************************************************
+ * OpenEMS - Open Source Energy Management System
+ * Copyright (c) 2016 FENECON GmbH and contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ *
+ * Contributors:
+ *   FENECON GmbH - initial API and implementation and initial documentation
+ *******************************************************************************/
+package io.openems.core.utilities;
+
+import java.util.Collections;
+import java.util.List;
+
+import io.openems.api.channel.WriteChannel;
+/**
+ *
+ * @author FENECON GmbH
+ *
+ */
+public class ControllerUtils {
+
+	public static double calculateCosPhi(long activePower, long reactivePower) {
+		if (reactivePower == 0) {
+			return 1;
+		}
+		return Math.cos(Math.atan((double) activePower / (double) reactivePower));
+	}
+
+	public static long calculateReactivePower(long activePower, double cosPhi) {
+		return (long) (Math.tan(Math.acos(cosPhi)) * activePower);
+	}
+
+	public static long calculateReactivePower(long activePower, long apparentPower) {
+		return (long) Math.sqrt(Math.pow(apparentPower, 2) - Math.pow(activePower, 2));
+	}
+
+	public static long calculateActivePower(long reactivePower, long apparentPower) {
+		return (long) Math.sqrt(Math.pow(apparentPower, 2) - Math.pow(reactivePower, 2));
+	}
+
+	public static long calculateApparentPower(long activePower, long reactivePower) {
+		return (long) Math.sqrt(Math.pow(activePower, 2) + Math.pow(reactivePower, 2));
+	}
+
+	public static double calculateActivePowerFromApparentPower(long apparentPower, double cosPhi) {
+		 
+		
+		return apparentPower * cosPhi;
+	}
+	
+
+	public static long calculateActivePowerFromReactivePower(long reactivePower, double cosPhi) {
+		long fix = (long) Math.tan(Math.acos(cosPhi));
+		return reactivePower / fix;
+	}
+
+	public static double calculateApparentPower(long activePower, double cosPhi) {
+		
+		return activePower / cosPhi;
+	}
+
+	public static long reduceActivePower(long activePower, long reactivePower, long maxChargeApparentPower,
+			long maxDischargeApparentPower) {
+		boolean activePowerPos = true;
+
+		if (activePower < 0) {
+			activePowerPos = false;
+		}
+
+		if (isCharge(activePower, reactivePower)) {
+			/*
+			 * Charge
+			 */
+			if (calculateApparentPower(activePower, reactivePower) * -1 < maxChargeApparentPower) {
+				double cosPhi = ControllerUtils.calculateCosPhi(activePower, reactivePower);
+				activePower = ControllerUtils.calculateActivePowerFromApparentPower(maxChargeApparentPower, cosPhi);
+			}
+		} else {
+
+			/*
+			 * Discharge
+			 */
+			if (ControllerUtils.calculateApparentPower(activePower, reactivePower) > maxDischargeApparentPower) {
+				double cosPhi = ControllerUtils.calculateCosPhi(activePower, reactivePower);
+				activePower = ControllerUtils.calculateActivePowerFromApparentPower(maxDischargeApparentPower, cosPhi);
+			}
+		}
+		if (!activePowerPos && activePower >= 0) {
+			activePower *= -1;
+		}
+
+		return activePower;
+	}
+
+	public static long reduceReactivePower(long activePower, long reactivePower, long maxChargeApparentPower,
+			long maxDischargeApparentPower, long maxApparent, WriteChannel<Long> setReactivePower) {
+		boolean reactivePowerPos = true;
+		if (reactivePower < 0) {
+			reactivePowerPos = false;
+		}
+		if (isCharge(activePower, reactivePower)) {
+			/*
+			 * Charge
+			 */
+			if (calculateApparentPower(activePower, reactivePower) * -1 < maxChargeApparentPower) {
+				double cosPhi = ControllerUtils.calculateCosPhi(activePower, reactivePower);
+				reactivePower = ControllerUtils.calculateReactivePower(reduceActivePower(activePower, reactivePower,
+						maxChargeApparentPower, maxDischargeApparentPower), cosPhi);
+			}
+		} else {
+
+			/*
+			 * Discharge
+			 */
+			if (ControllerUtils.calculateApparentPower(activePower, reactivePower) > maxDischargeApparentPower) {
+				double cosPhi = ControllerUtils.calculateCosPhi(activePower, reactivePower);
+				reactivePower = ControllerUtils.calculateReactivePower(reduceActivePower(activePower, reactivePower,
+						maxChargeApparentPower, maxDischargeApparentPower), cosPhi);
+			}
+		}
+		if (!reactivePowerPos && reactivePower >= 0) {
+			reactivePower *= -1;
+		}
+		return reactivePower;
+	}
+
+	public static boolean isCharge(long activePower, long reactivePower) {
+		if (activePower >= 0 && reactivePower >= 0) {
+			return false;
+		} else if (activePower < 0 && reactivePower >= 0) {
+			return true;
+		} else if (activePower < 0 && reactivePower < 0) {
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	public static double getValueOfLine(List<Point> points, double x) {
+		Point smaller = getSmallerPoint(points, x);
+		Point greater = getGreaterPoint(points, x);
+		if (smaller != null && greater == null) {
+			return smaller.y;
+		} else if (smaller == null && greater != null) {
+			return greater.y;
+		} else if (smaller != null && greater != null) {
+			
+			//funzione
+			return getV(smaller, greater, x);
+			
+		} else {
+			throw new ArithmeticException("x[" + x + "] is out of Range of the points");
+		}
+	}
+	
+	public double getV(Point smaller, Point greater, double x){
+		
+		if (smaller.equals(greater)) {
+			return smaller.y;
+		} else {
+			double m = (greater.y - smaller.y) / (greater.x - smaller.x);
+			double t = smaller.y - m * smaller.x;
+			return m * x + t;
+		}
+		
+	}
+
+	private static Point getGreaterPoint(List<Point> points, double x) {
+		Collections.sort(points, (p1, p2) -> (int) (p1.x - p2.x));
+		int sizePoint=points.size();
+		for (int i = 0; i < sizePoint; i++) {
+			Point p = points.get(i);
+			if (p.x >= x) {
+				return p;
+			}
+		}
+		return null;
+	}
+
+	private static Point getSmallerPoint(List<Point> points, double x) {
+		Collections.sort(points, (p1, p2) -> (int) (p2.x - p1.x));
+		int sizePoint=points.size();
+		for (int i = 0; i < sizePoint; i++) {
+			Point p = points.get(i);
+			if (p.x <= x) {
+				return p;
+			}
+		}
+		return null;
+	}
+}
